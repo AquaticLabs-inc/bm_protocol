@@ -11,16 +11,27 @@
 #include "task_priorities.h"
 #include "uptime.h"
 #include "util.h"
+#include "sensorSampler.h"
+#include "avgSampler.h"
+#include "array_utils.h"
+#include "app_pub_sub.h"
+#include "htuSampler.h"
 
 #define LED_ON_TIME_MS 20
 #define LED_PERIOD_MS 1000
-
 void setup(void) {
   /* USER ONE-TIME SETUP CODE GOES HERE */
 }
 
 void loop(void) {
   /* USER LOOP CODE GOES HERE */
+
+  /* Print out the values from the humidity & temperature sensor */
+  float temperature, humidity = 0.0;
+  if (htuSamplerGetLatest(temperature, humidity)) {
+    printf("hum-temp from user code: H: %f, T:%f\n", humidity, temperature);
+  }
+
   /// This section demonstrates a simple non-blocking bare metal method for rollover-safe timed tasks,
   ///   like blinking an LED.
   /// More canonical (but more arcane) modern methods of implementing this kind functionality
