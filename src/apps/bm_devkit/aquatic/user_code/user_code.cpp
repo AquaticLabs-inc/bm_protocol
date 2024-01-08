@@ -17,21 +17,9 @@
 
 #define LED_ON_TIME_MS 20
 #define LED_PERIOD_MS 1000
+#define LINE_BUFFER_SIZE 2048 // matches what's in payload_uart.cpp
 
-void loadCellSamplerInit(NAU7802 *sensor);
-
-NAU7802 loadCell(&i2c1, NAU7802_ADDR);
-
-// A timer variable we can set to trigger a pulse on LED2 when we get payload serial data
-static int32_t ledLinePulse = -1;
-// This function is called from the payload UART library in src/lib/common/payload_uart.cpp::processLine function.
-//  Every time the uart receives the configured termination character ('\0' character by default),
-//  It will:
-//   -- print the line to Dev Kit USB console.
-//   -- print the line to Spotter USB console.
-//   -- write the line to a payload_data.log on the Spotter SD card.
-//   -- call this function, so we can do custom things with the data.
-//      In this case, we just set a trigger to pulse LED2 on the Dev Kit.
+// Code is mostly sourced from rbr_coda_example/user_code.cpp
 
 void setup(void) {
   // Setup the UART – the on-board serial driver that talks to the RS232 transceiver.
@@ -48,40 +36,59 @@ void setup(void) {
   vTaskDelay(pdMS_TO_TICKS(5));
   // enable Vout, 12V by default.
   bristlefin.enableVout();
+  bristlefin.enable5V();
 }
 
 void loop(void) {
-  /* USER LOOP CODE GOES HERE */
+  static u_int32_t led2OnTime = 0;
   static bool led2State = false;
-  /// This checks for a trigger set by ledLinePulse when data is received from the payload UART.
-  ///   Each time this happens, we pulse LED2 Green.
-  // If LED2 is off and the ledLinePulse flag is set (done in our payload UART process line function), turn it on Green.
-  if (!led2State && ledLinePulse > -1) {
-    bristlefin.setLed(2, Bristlefin::LED_GREEN);
-    led2State = true;
-  }
-  // If LED2 has been on for LED_ON_TIME_MS, turn it off.
-  else if (led2State &&
-           ((u_int32_t)uptimeGetMs() - ledLinePulse >= LED_ON_TIME_MS)) {
+  if (led2State && ((u_int32_t)uptimeGetMs() - led2OnTime >= LED_ON_TIME_MS * 20)) {
     bristlefin.setLed(2, Bristlefin::LED_OFF);
-    ledLinePulse = -1;
     led2State = false;
   }
 
-  static u_int32_t ledPulseTimer = uptimeGetMs();
-  static u_int32_t ledOnTimer = 0;
-  static bool led1State = false;
-  // Turn LED1 on green every LED_PERIOD_MS milliseconds.
-  if (!led1State &&
-      ((u_int32_t)uptimeGetMs() - ledPulseTimer >= LED_PERIOD_MS)) {
-    bristlefin.setLed(1, Bristlefin::LED_RED);
-    ledOnTimer = uptimeGetMs();
-    ledPulseTimer += LED_PERIOD_MS;
-    led1State = true;
+  if (PLUART::lineAvailable()) {
+    // read sensor data
+    char lineBuffer[LINE_BUFFER_SIZE];
+    size_t len = PLUART::readLine(lineBuffer, LINE_BUFFER_SIZE);
+    if (len > 0) {
+      printf("length: %d\n", len);
+      printf("Received line: %.*s\n", (int)len, lineBuffer);
+      bristlefin.setLed(2, Bristlefin::LED_GREEN);
+      led2State = true;
+      led2OnTime = uptimeGetMs();
+    }
+    // get rtc time
+    RTCTimeAndDate_t time_and_date = {};
+    rtcGet(&time_and_date);
+    char rtcTimeBuffer[32] = {};
+    rtcPrint(rtcTimeBuffer, NULL);
+    printf("RTC time: %s\n", rtcTimeBuffer);
+    // format and send over network
+    char formattedData[2048];
+    snprintf(formattedData, sizeof(formattedData), "data: %.*s time: %s", (int)len, lineBuffer,
+             rtcTimeBuffer);
+
+    if (spotter_tx_data((uint8_t *)formattedData, strlen(formattedData),
+                        BM_NETWORK_TYPE_CELLULAR_ONLY)) { // Cell only for now
+      printf("%llut - %s | Successfully sent Spotter transmit data request\n", uptimeGetMs(),
+             rtcTimeBuffer);
+    } else {
+      printf("%llut - %s | Failed to send Spotter transmit data request\n", uptimeGetMs(),
+             rtcTimeBuffer);
+    }
   }
-  // If LED1 has been on for LED_ON_TIME_MS milliseconds, turn it off.
-  else if (led1State &&
-           ((u_int32_t)uptimeGetMs() - ledOnTimer >= LED_ON_TIME_MS)) {
+
+  // Flash led red to indicate OK status
+  static u_int32_t led1PulseTimer = uptimeGetMs();
+  static u_int32_t led1OnTimer = 0;
+  static bool led1State = false;
+  if (!led1State && ((u_int32_t)uptimeGetMs() - led1PulseTimer >= LED_PERIOD_MS)) {
+    bristlefin.setLed(1, Bristlefin::LED_RED);
+    led1OnTimer = uptimeGetMs();
+    led1PulseTimer += LED_PERIOD_MS;
+    led1State = true;
+  } else if (led1State && ((u_int32_t)uptimeGetMs() - led1OnTimer >= LED_ON_TIME_MS)) {
     bristlefin.setLed(1, Bristlefin::LED_OFF);
     led1State = false;
   }
