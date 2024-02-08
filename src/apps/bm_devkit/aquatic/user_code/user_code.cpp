@@ -46,38 +46,33 @@ void loop(void) {
     bristlefin.setLed(2, Bristlefin::LED_OFF);
     led2State = false;
   }
-
   if (PLUART::lineAvailable()) {
     // read sensor data
     char lineBuffer[LINE_BUFFER_SIZE];
     size_t len = PLUART::readLine(lineBuffer, LINE_BUFFER_SIZE);
     if (len > 0) {
       printf("length: %d\n", len);
-      printf("Received line: %.*s\n", (int)len, lineBuffer);
+      printf("Received line: %.*s\n", (int)len, lineBuffer);  // May not be safe for binary data
       bristlefin.setLed(2, Bristlefin::LED_GREEN);
       led2State = true;
       led2OnTime = uptimeGetMs();
-    }
-    // get rtc time
-    RTCTimeAndDate_t time_and_date = {};
-    rtcGet(&time_and_date);
-    char rtcTimeBuffer[32] = {};
-    rtcPrint(rtcTimeBuffer, NULL);
-    printf("RTC time: %s\n", rtcTimeBuffer);
-    // format and send over network
-    char formattedData[2048];
-    snprintf(formattedData, sizeof(formattedData), "data: %.*s time: %s", (int)len, lineBuffer,
-             rtcTimeBuffer);
+      char formattedData[2048];
 
-    if (spotter_tx_data((uint8_t *)formattedData, strlen(formattedData),
-                        BM_NETWORK_TYPE_CELLULAR_ONLY)) { // Cell only for now
-      printf("%llut - %s | Successfully sent Spotter transmit data request\n", uptimeGetMs(),
-             rtcTimeBuffer);
-    } else {
-      printf("%llut - %s | Failed to send Spotter transmit data request\n", uptimeGetMs(),
-             rtcTimeBuffer);
+      // Ensure we don't overflow formattedData buffer
+      size_t dataLength = std::min(len, sizeof(formattedData));
+
+      // Copy binary data from lineBuffer to formattedData
+      memcpy(formattedData, lineBuffer, dataLength);
+
+      // Send over the network, specifying the data length explicitly
+      if (spotter_tx_data((uint8_t *)formattedData, dataLength, BM_NETWORK_TYPE_CELLULAR_IRI_FALLBACK)) {
+          printf("%llut - Successfully sent Spotter transmit data request\n", uptimeGetMs());
+      } else {
+          printf("%llut - Failed to send Spotter transmit data request\n", uptimeGetMs());
+      }
     }
-  }
+}
+
 
   // Flash led red to indicate OK status
   static u_int32_t led1PulseTimer = uptimeGetMs();
