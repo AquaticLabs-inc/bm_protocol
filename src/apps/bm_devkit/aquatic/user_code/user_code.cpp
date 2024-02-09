@@ -39,6 +39,13 @@ void setup(void) {
   bristlefin.enable5V();
 }
 
+uint8_t hexCharToByte(char hexChar) {
+  if (hexChar >= '0' && hexChar <= '9') return hexChar - '0';
+  if (hexChar >= 'A' && hexChar <= 'F') return hexChar - 'A' + 10;
+  if (hexChar >= 'a' && hexChar <= 'f') return hexChar - 'a' + 10;
+  return 0;  // Non-hex character
+}
+
 void loop(void) {
   static u_int32_t led2OnTime = 0;
   static bool led2State = false;
@@ -50,19 +57,29 @@ void loop(void) {
     // read sensor data
     char lineBuffer[LINE_BUFFER_SIZE];
     size_t len = PLUART::readLine(lineBuffer, LINE_BUFFER_SIZE);
+    // Prepare a buffer to hold the converted byte data
+    uint8_t byteData[LINE_BUFFER_SIZE / 2];  // Each byte is represented by 2 hex characters
+    size_t byteIndex = 0;
+
+    // Convert hex string back to bytes
+    for (size_t i = 0; i < len; i += 2) {  // Process two hex characters at a time
+      if (i + 1 < len) {  // Make sure we don't go past the string end
+        byteData[byteIndex++] = (hexCharToByte(lineBuffer[i]) << 4) | hexCharToByte(lineBuffer[i + 1]);
+      }
+    }
     if (len > 0) {
       printf("length: %d\n", len);
-      printf("Received line: %.*s\n", (int)len, lineBuffer);  // May not be safe for binary data
+      printf("Received line: %.*s\n", (int)len, lineBuffer);
       bristlefin.setLed(2, Bristlefin::LED_GREEN);
       led2State = true;
       led2OnTime = uptimeGetMs();
       char formattedData[2048];
 
       // Ensure we don't overflow formattedData buffer
-      size_t dataLength = std::min(len, sizeof(formattedData));
+      size_t dataLength = std::min(byteIndex, sizeof(formattedData));
 
-      // Copy binary data from lineBuffer to formattedData
-      memcpy(formattedData, lineBuffer, dataLength);
+      // Copy binary data from byteData to formattedData
+      memcpy(formattedData, byteData, dataLength);
 
       // Send over the network, specifying the data length explicitly
       if (spotter_tx_data((uint8_t *)formattedData, dataLength, BM_NETWORK_TYPE_CELLULAR_IRI_FALLBACK)) {
